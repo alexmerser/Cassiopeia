@@ -26,16 +26,14 @@ class APIRateMeter:
             #Make sure they are valid rates, or raise an error
             if not rates:
                 rates = APIRateMeter.default_rate
-            if not self._validaterates(rates):
-                raise InvalidRates
+            self._validaterates(rates)
             APIRateMeter._tracked_keys[apikey] = {'rates':rates,
                                                 'maxdelta':max(rate[1] for rate in rates),
                                                 'requestTimestamps':[]}
         else:
             #If already tracked and new rates provided, update the rates
             if rates:
-                if not self._validaterates(rates):
-                    raise InvalidRates
+                self._validaterates(rates)
                 APIRateMeter._tracked_keys[apikey] = {'rates':rates,
                                                 'maxdelta':max(rate[1] for rate in rates),
                                                 'requestTimestamps':APIRateMeter._tracked_keys[apikey]['requestTimestamps']}
@@ -47,7 +45,7 @@ class APIRateMeter:
         '''Returns true if no rate has been exceeded. Does not count as an API
         access itself.'''
         rates = APIRateMeter._tracked_keys[self.key]['rates']
-        timestamps = APIRateMeter.tracked_keys[self.key]['requestTimestamps']
+        timestamps = APIRateMeter._tracked_keys[self.key]['requestTimestamps']
         for rate in rates:
             callcount = len([stamp for stamp in timestamps if stamp - datetime.now() < rate[1]])
             if  callcount >= rate[0]:
@@ -71,7 +69,7 @@ class APIRateMeter:
         they no longer need to be tracked.'''
         timestamps = APIRateMeter._tracked_keys[self.key]['requestTimestamps']
         maxdelta = APIRateMeter._tracked_keys[self.key]['maxdelta']
-        timestamps = [ts for ts in timestamps if ts - datetime.now > maxdelta]
+        timestamps = [ts for ts in timestamps if (ts - datetime.now()) < maxdelta]
         APIRateMeter._tracked_keys[self.key]['requestTimestamps'] = timestamps
 
     @staticmethod        
@@ -80,28 +78,25 @@ class APIRateMeter:
             try:
                 for r in rates:
                     if not isinstance(r[0],int):
-                        return False
+                        raise InvalidRates
                     if not isinstance(r[1],timedelta):
-                        return False
+                        raise InvalidRates
             except IndexError:
-                return False
-        else:
-            return True
-
+                raise InvalidRates
 
 class RiotAPISession(Session):
     '''RiotAPISession'''
 
-    REGIONS = {'BR':'br.api.pvp.net',
-            'EUNE':'eune.api.pvp.net',
-            'EUW':'euw.api.pvp.net',
-            'KR':'kr.api.pvp.net',
-            'LAN':'las.api.pvp.net',
-            'LAS':'las.api.pvp.net',
-            'NA':'na.api.pvp.net',
-            'OCE':'oce.api.pvp.net',
-            'RU':'ru.api.pvp.net',
-            'TR':'tr.api.pvp.net'}
+    REGIONS = {'br':'br.api.pvp.net',
+            'eune':'eune.api.pvp.net',
+            'euw':'euw.api.pvp.net',
+            'kr':'kr.api.pvp.net',
+            'lan':'las.api.pvp.net',
+            'las':'las.api.pvp.net',
+            'na':'na.api.pvp.net',
+            'oce':'oce.api.pvp.net',
+            'ru':'ru.api.pvp.net',
+            'tr':'tr.api.pvp.net'}
 
     def __init__(self,apikey,region):
         self.apikey = apikey
@@ -114,23 +109,22 @@ class RiotAPISession(Session):
 
         super().__init__()
 
-    def get(endpoint,params={},ratelimited=True):
+    def get(self,endpoint,params={},ratelimited=True):
         '''Takes care of all the busy work that needs to be done every time the
         LoL API is called such triggering the rate limiter, passing the API key
         as a parameter, and picking the correct region server.'''
         params['api_key'] = self.apikey
         if ratelimited:
             self.ratemeter.access()
-        req = super().get('https://' + REGIONS[self.region] +
+        req = super().get('https://' + RiotAPISession.REGIONS[self.region] +
                 endpoint,params=params)
         return req
 
-    def champion(championid=None,freeToPlay=False):
+    def champion(self,championid=None,freeToPlay=False):
         '''Returns information about champions. Can be given a champion id to
         get information on a specific champion, or if given no championId, will
         return a list of all champions. If freeToPlay is True, will only return
         champions that are currently free to play.'''
-#champion-v1.2 [BR, EUNE, EUW, KR, LAN, LAS, NA, OCE, RU, TR] Show/Hide List OperationsExpand Operations
         if championid:
             query = '/api/lol/{region}/v1.2/champion/{championid}'
             query = query.format(championid=championid,region=self.region)
@@ -143,15 +137,42 @@ class RiotAPISession(Session):
 
         return self.get(query,params=p).json()
 
+    def game(self,summonerid):
+        '''Returns a list of up to 10 most recent games by summonerId.'''
+        query = '/api/lol/{region}/v1.3/game/by-summoner/{summonerId}/recent'
+        query = query.format(region=self.region,summonerId=summonerid)
+        return self.get(query).json()
 
-#game-v1.3 [BR, EUNE, EUW, KR, LAN, LAS, NA, OCE, RU, TR] Show/Hide List OperationsExpand Operations
-'/api/lol/{region}/v1.3/game/by-summoner/{summonerId}/recent' #Get recent games by summoner ID. (REST)
-#league-v2.4 [BR, EUNE, EUW, KR, LAN, LAS, NA, OCE, RU, TR] Show/Hide List OperationsExpand Operations
-'/api/lol/{region}/v2.4/league/by-summoner/{summonerIds}' #Get leagues mapped by summoner ID for a given list of summoner IDs. (REST)
-'/api/lol/{region}/v2.4/league/by-summoner/{summonerIds}/entry' #Get league entries mapped by summoner ID for a given list of summoner IDs. (REST)
-'/api/lol/{region}/v2.4/league/by-team/{teamIds}' #Get leagues mapped by team ID for a given list of team IDs. (REST)
-'/api/lol/{region}/v2.4/league/by-team/{teamIds}/entry' #Get league entries mapped by team ID for a given list of team IDs. (REST)
-'/api/lol/{region}/v2.4/league/challenger' #Get challenger tier leagues. (REST)
+    def league_by_summoner(self,summonerids,summoneronly=False):
+        '''Gets ranked league information by summoner ID. summonerids should be
+        a list of up to 40 summonerids. If summoneronly is True, will only
+        return league information on the specific summoner. Otherwise, it will
+        return information for that summoner's entire league.'''
+        if summoneronly:
+            query = '/api/lol/{region}/v2.4/league/by-summoner/{summonerIds}/entry'
+        else:
+            query = '/api/lol/{region}/v2.4/league/by-summoner/{summonerIds}'
+        query = query.format(summonerIds=summonerids,region=self.region)
+        return self.get(query).json()
+
+    def league_by_team(self,teamids,teamonly=False):
+        '''Gets ranked league information by team ID. teamids should be
+        a list of up to 40 teamids. If teamonly is True, will only
+        return league information on the specific team. Otherwise, it will
+        return information for that team's entire league.'''
+        if teamonly:
+            query = '/api/lol/{region}/v2.4/league/by-team/{teamIds}/entry'
+        else:
+            query = '/api/lol/{region}/v2.4/league/by-team/{teamIds}'
+        query = query.format(teamIds=teamids,region=self.region)
+        return self.get(query).json()
+
+    def challenger_league(self):
+        '''Returns all information on the challenger league.'''
+        query = '/api/lol/{region}/v2.4/league/challenger'
+        query = query.format(region=self.region)
+        return self.get(query).json()
+
 #lol-static-data-v1.2 [BR, EUNE, EUW, KR, LAN, LAS, NA, OCE, RU, TR] Show/Hide List OperationsExpand Operations
 '/api/lol/static-data/{region}/v1.2/champion' #Retrieves champion list. (REST)
 '/api/lol/static-data/{region}/v1.2/champion/{id}' #Retrieves a champion by its id. (REST)
