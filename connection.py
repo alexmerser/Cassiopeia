@@ -173,19 +173,42 @@ class RiotAPISession(Session):
         query = query.format(region=self.region)
         return self.get(query).json()
 
-#lol-static-data-v1.2 [BR, EUNE, EUW, KR, LAN, LAS, NA, OCE, RU, TR] Show/Hide List OperationsExpand Operations
-'/api/lol/static-data/{region}/v1.2/champion' #Retrieves champion list. (REST)
-'/api/lol/static-data/{region}/v1.2/champion/{id}' #Retrieves a champion by its id. (REST)
-'/api/lol/static-data/{region}/v1.2/item' #Retrieves item list. (REST)
-'/api/lol/static-data/{region}/v1.2/item/{id}' #Retrieves item by its unique id. (REST)
-'/api/lol/static-data/{region}/v1.2/mastery' #Retrieves mastery list. (REST)
-'/api/lol/static-data/{region}/v1.2/mastery/{id}' #Retrieves mastery item by its unique id. (REST)
-'/api/lol/static-data/{region}/v1.2/realm' #Retrieve realm data. (REST)
-'/api/lol/static-data/{region}/v1.2/rune' #Retrieves rune list. (REST)
-'/api/lol/static-data/{region}/v1.2/rune/{id}' #Retrieves rune by its unique id. (REST)
-'/api/lol/static-data/{region}/v1.2/summoner-spell' #Retrieves summoner spell list. (REST)
-'/api/lol/static-data/{region}/v1.2/summoner-spell/{id}' #Retrieves summoner spell by its unique id. (REST)
-'/api/lol/static-data/{region}/v1.2/versions' #Retrieve version data. (REST)
+    def match(self,matchid,includeTimeline=True):
+        '''Gets match data by matchid. If includeTimeline is True, will also
+        retrieve timeline data for the match.'''
+        query = '/api/lol/{region}/v2.2/match/{matchId}'
+        query.format(region=self.region,matchId=matchid)
+        params = {}
+        if includeTimeline:
+            params['includeTimeline'] = 'True'
+        return self.get(query,params=params).json()
+
+    def matchhistory(self,summonerid):
+        '''Gets the match history for a summoner.'''
+        query = '/api/lol/{region}/v2.2/matchhistory/{summonerId}'
+        query.format(region=self.region,matchId=matchid)
+        return self.get(query).json()
+
+    def getstaticdata(self,static,objectid=None,params={}):
+        '''Gets static data from LoL. Does not count against the API call
+        limits. If static is not valid, will return False. params will be passed
+        to the API, but are not currently validated. See Riot's documentation on
+        the static calls to know what parameters can be passed to each static.
+
+        static may be: champion,item,mastery,realm,rune,summoner-spell,versions
+        If id is provided and appropriate, will provide only static information
+        for the object with that id.'''
+        if static not in (
+                'champion','item','mastery','realm','rune','summoner-spell','versions'):
+            return False
+        if objectid:
+            query = '/api/lol/static-data/{region}/v1.2/{static}/{objid}'
+            query = query.format(region=self.region,static=static,objid=objectid)
+        else:
+            query = '/api/lol/static-data/{region}/v1.2/{static}'
+            query = query.format(region=self.region,static=static)
+        return self.get(query,params=params,ratelimited=False)
+
 #stats-v1.3 [BR, EUNE, EUW, KR, LAN, LAS, NA, OCE, RU, TR] Show/Hide List OperationsExpand Operations
 '/api/lol/{region}/v1.3/stats/by-summoner/{summonerId}/ranked' #Get ranked stats by summoner ID. (REST)
 '/api/lol/{region}/v1.3/stats/by-summoner/{summonerId}/summary' #Get player stats summaries by summoner ID. (REST)
